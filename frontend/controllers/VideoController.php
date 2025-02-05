@@ -18,7 +18,7 @@ class VideoController extends Controller
         return [
             'access' => [
                 'class' => \yii\filters\AccessControl::class,
-                'only' => ['like', 'dislike'],
+                'only' => ['like', 'dislike', 'history'],
                 'rules' => [
                     [
                         'allow' => true,
@@ -38,13 +38,17 @@ class VideoController extends Controller
     }
     public function actionIndex()
     {
-
+        $this->layout = 'main';
         $dataProvider = new ActiveDataProvider([
-            'query' => Video::find()->published()->latest()
+            'query' => Video::find()->with('createdBy')->published()->latest(),
+            'pagination' => [
+                'pageSize' => 20,
+            ]
         ]);
 
         return $this->render("index", [
             'dataProvider' => $dataProvider,
+            
         ]);
     }
     public function actionView($id)
@@ -58,8 +62,11 @@ class VideoController extends Controller
         $videoView->created_at = time();
         $videoView->save();
 
+        $similarVideos = Video::find()->published()->byKeyword($video->title)->andWhere(['NOT', ['video_id' => $id]])->limit(10)->all();
+
         return $this->render('view', [
             'model' => $video,
+            'similarVideos' => $similarVideos,
         ]);
     }
 
@@ -107,6 +114,41 @@ class VideoController extends Controller
         
 
         return $this->renderAjax('_buttons', ['model' => $video]);
+    }
+
+    public function actionSearch($keyword) {
+        $this->layout = 'main';
+
+        $query = Video::find()->with('createdBy')->published()->latest();
+        if($keyword) {
+            $query->byKeyword($keyword)->orderBy("MATCH(title, description, tags) AGAINST ('$keyword') DESC");
+        }
+        $dataProvider = new ActiveDataProvider([
+            'query' => $query,
+        ]);
+
+        return $this->render("search", [
+            'dataProvider' => $dataProvider,
+        ]);
+    }
+
+    public function actionHistory() {
+        $this->layout = 'main';
+
+        $query = Video::find()->alias('v')->innerJoin("(SELECT video_id, MAX(created_at) as max_date FROM video_view 
+        WHERE user_id = :userId 
+        GROUP BY video_id) vv", 'vv.video_id = v.video_id', [
+            'userId' => \Yii::$app->user->id
+        ])
+        ->orderBy("vv.max_date DESC");
+
+        $dataProvider = new ActiveDataProvider([
+            'query' => $query,
+        ]);
+
+        return $this->render("history", [
+            'dataProvider' => $dataProvider,
+        ]);
     }
 
     protected function findVideo($id)
